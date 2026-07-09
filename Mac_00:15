@@ -1,6 +1,5 @@
 #!/bin/bash
 echo "Memulai setup Armbian..."
-nano /etc/network/interfaces.d/*
 # Network is managed by Network manager
 auto eth0
 iface eth0 inet dhcp
