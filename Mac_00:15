@@ -4,5 +4,5 @@ echo "Memulai setup Armbian..."
 auto eth0
 iface eth0 inet dhcp
 
-hwaddress ether 00:15:18:01:81:31
+hwaddress ether CA:6D:02:81:16:C7
 iface lo inet loopback
