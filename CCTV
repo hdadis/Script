@@ -1,0 +1,14 @@
+#!/bin/bash
+echo "Memulai setup Armbian..."
+docker run -d \
+  --name lightnvr \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -p 8554:8554 \
+  -p 8555:8555 \
+  -p 8555:8555/udp \
+  -p 1984:1984 \
+  -v ./config:/etc/lightnvr \
+  -v ./data:/var/lib/lightnvr/data \
+  -e TZ=America/New_York \
+  opensensor/lightnvr:latest
