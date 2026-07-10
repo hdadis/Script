@@ -1,0 +1,17 @@
+#!/bin/bash
+echo "Memulai setup Armbian..."
+services:
+  gopeed:
+    container_name: gopeed
+    image: liwei2633/gopeed
+    restart: unless-stopped
+    network_mode: bridge
+    ports:
+      - "9999:9999"
+    environment:
+      - GOPEED_ADDRESS=0.0.0.0
+      - GOPEED_USERNAME=dadi   # Change this to your preferred username
+      - GOPEED_PASSWORD=980Abc   # Change this to your preferred password
+    volumes:
+      - /Downloads:/mnt/seagate/Downloads/IDM # Update to match your desired download directory
+      - /Config:/opt/Gopeed
