@@ -1,5 +1,3 @@
-#!/bin/bash
-echo "Memulai setup Armbian..."
 docker run -d \
   --name lightnvr \
   --restart unless-stopped \
