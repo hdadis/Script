@@ -1,5 +1,3 @@
-#!/bin/bash
-echo "Memulai setup Armbian..."
 services:
   gopeed:
     container_name: gopeed
