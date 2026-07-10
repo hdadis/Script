@@ -1,12 +1,45 @@
-docker run -d \
-  --name lightnvr \
-  --restart unless-stopped \
-  -p 8080:8080 \
-  -p 8554:8554 \
-  -p 8555:8555 \
-  -p 8555:8555/udp \
-  -p 1984:1984 \
-  -v ./config:/etc/lightnvr \
-  -v ./data:/var/lib/lightnvr/data \
-  -e TZ=America/New_York \
-  opensensor/lightnvr:latest
+services:
+  lightnvr:
+    # Published multi-arch image (amd64, arm64, armv7); pin a version tag
+    # (e.g. ghcr.io/opensensor/lightnvr:1.0) instead of latest if preferred
+    image: ghcr.io/opensensor/lightnvr:latest
+    # To build from source instead, comment out `image:` above, uncomment
+    # `build:` below, and run: git submodule update --init --recursive
+    # build:
+    #   context: .
+    #   pull: true
+    container_name: lightnvr
+    restart: unless-stopped
+    ports:
+      - "8080:8080"     # Web UI
+      - "8554:8554"     # RTSP
+      - "8555:8555"     # WebRTC TCP
+      - "8555:8555/udp" # WebRTC UDP
+      - "1984:1984"     # go2rtc API
+    volumes:
+      # Only mount what needs persistence
+      # DO NOT mount /var/lib/lightnvr directly - it will overwrite web assets!
+      - ./config:/etc/lightnvr
+      - ./data:/var/lib/lightnvr/data
+    environment:
+      # Timezone configuration
+      - TZ=UTC  # Change to your timezone (e.g., America/New_York, Europe/London)
+
+      # go2rtc configuration persistence
+      # Set to 'false' to let go2rtc regenerate config on each restart
+      - GO2RTC_CONFIG_PERSIST=true
+
+      # Auto-initialize configuration files on first run
+      - LIGHTNVR_AUTO_INIT=true
+
+      # ONVIF camera discovery network (for containers)
+      # Uncomment and set to your camera network in CIDR notation
+      # Example: 192.168.1.0/24 for cameras on 192.168.1.x network
+      # - LIGHTNVR_ONVIF_NETWORK=192.168.82.0/24
+
+    networks:
+      - lightnvr
+
+networks:
+  lightnvr:
+    driver: bridge
