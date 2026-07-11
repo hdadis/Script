@@ -1,0 +1,12 @@
+[Unit]
+Description=JetDirect-compatible server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/jetdirect.sh
+KillMode=process
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
