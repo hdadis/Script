@@ -1,0 +1,8 @@
+# Printer number, if not 0
+P910ND_NUM=0
+
+# Additional daemon arguments, see man 8 p910nd
+P910ND_OPTS="-f /dev/usb/lp0"
+
+# Debian specific (set to 1 to enable start by default)
+P910ND_START=1
