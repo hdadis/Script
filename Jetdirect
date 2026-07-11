@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+nc -kl 9100 > /dev/usb/lp0
