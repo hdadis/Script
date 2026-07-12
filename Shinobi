@@ -1,3 +1,4 @@
-y
-980Abc
-y
+Shinobi - Do you want to Install MariaDB? Choose No if you already have it. y
+Password for root SQL user, If you are installing SQL now then you may put anything: 980Abc
+Shinobi - Database Installation y
+Shinobi - Start Shinobi and set to start on boot? y
