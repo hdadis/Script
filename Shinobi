@@ -2,3 +2,30 @@ Shinobi - Do you want to Install MariaDB? Choose No if you already have it. y
 Password for root SQL user, If you are installing SQL now then you may put anything: 980Abc
 Shinobi - Database Installation y
 Shinobi - Start Shinobi and set to start on boot? y
+
+
+expect {
+    # Contoh 1: Jika ditanya tipe instalasi (misal pilihan 1 atau 2)
+    -re "Do you want to Install MariaDB? Choose No if you already have it.*" {
+        send "y\r"
+        exp_continue
+    }
+    # Contoh 2: Jika ditanya mau install database atau tidak (jawab y)
+    -re "Password for root SQL user, If you are installing SQL now then you may put anything:*" {
+        send "980Abc\r"
+        exp_continue
+    }
+    # Contoh 3: Jika diminta memasukkan password kustom
+    -re "Shinobi - Database Installation*" {
+        send "y\r"
+        exp_continue
+    }
+    # Contoh 4: Jika ada pertanyaan yang jawabannya berbeda (misal pilih 'n')
+    -re "Shinobi - Start Shinobi and set to start on boot?*" {
+        send "y\r"
+        exp_continue
+    }
+    # Menangani akhir dari proses script
+    eof
+}
+EOF
