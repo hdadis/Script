@@ -1,0 +1,6 @@
+# Network is managed by Network manager
+auto eth0
+iface eth0 inet dhcp
+
+hwaddress ether 74:51:BA:0F:2E:E1
+iface lo inet loopback
