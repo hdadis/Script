@@ -34,7 +34,8 @@ server:
     hide-version: yes
 
     # Allow access only from localhost
-    access-control: 127.0.0.0/8 allow
+    access-control: 127.0.0.0 allow
+    access-control: 192.168.18.0/24 allow
     access-control: ::1 allow
 
     # Prevent privatization/leakage of local ranges
