@@ -6,6 +6,10 @@ server:
     access-control: 0.0.0.0/0 deny
     access-control: ::0/0 deny
 
+    local-zone: "somebadsites.com." static
+    local-zone: "somebadsites.com. IN A 127.0.0.1"
+    local-data-ptr: "127.0.0.1 somebadsites.com."
+
 Forward Zone:
 
     Name:"."
