@@ -14,7 +14,7 @@ server:
 
 Forward Zone:
 
-    Name:"."
+    Name:"ForwardZone"
 
     forward-addr: 4.2.2.2
     forward-addr: 4.2.2.1
