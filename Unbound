@@ -1,52 +1,10 @@
 server:
-    # Verbosity level (0 = silent/errors only, 1 = operational details)
-    verbosity: 1
-
-    # Listen on localhost (IPv4 and IPv6)
-    interface: 127.0.0.1
-    interface: ::1
-    
-    # Custom port to avoid conflict with systemd-resolved or Pi-hole (default DNS is 53)
-    port: 5335
-
-    # Enable IPv4, IPv6, UDP, and TCP protocols
-    do-ip4: yes
-    do-ip6: yes
-    do-udp: yes
-    do-tcp: yes
-
-    # Load root hints for recursive DNS resolution
-    root-hints: "/var/lib/unbound/root.hints"
-
-    # Trust anchor file for DNSSEC validation
-    auto-trust-anchor-file: "/var/lib/unbound/root.key"
-
-    # Security & Privacy settings
-    harden-glue: yes
-    harden-dnssec-stripped: yes
-    use-caps-for-id: no
-    edns-buffer-size: 1232
-    prefetch: yes
-    num-threads: 1
-
-    # Hide identity and version info from queries
-    hide-identity: yes
-    hide-version: yes
-
-    # Allow access only from localhost
+    interface: 0.0.0.0
+    access-control: 192.168.0.0/24 allow
     access-control: 127.0.0.0 allow
-    access-control: 192.168.18.0/24 allow
     access-control: ::1 allow
     access-control: 0.0.0.0/0 deny
     access-control: ::0/0 deny
-
-    # Prevent privatization/leakage of local ranges
-    private-address: 10.0.0.0/8
-    private-address: 172.16.0.0/12
-    private-address: 192.168.18.0/24
-    private-address: 169.254.0.0/16
-    private-address: fd00::/8
-    private-address: fe80::/8
 
 Forward Zone:
 
@@ -55,7 +13,3 @@ Forward Zone:
     forward-addr: 4.2.2.2
     forward-addr: 4.2.2.1
     forward-first: yes
-
-
-
-
