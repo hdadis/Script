@@ -16,7 +16,7 @@ server:
     do-tcp: yes
 
     # Load root hints for recursive DNS resolution
-    root-hints: "/var/lib/unbound/root.hints"
+    # root-hints: "/var/lib/unbound/root.hints"
 
     # Trust anchor file for DNSSEC validation
     auto-trust-anchor-file: "/var/lib/unbound/root.key"
