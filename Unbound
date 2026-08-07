@@ -37,6 +37,8 @@ server:
     access-control: 127.0.0.0 allow
     access-control: 192.168.18.0/24 allow
     access-control: ::1 allow
+    access-control: 0.0.0.0/0 deny
+    access-control: ::0/0 deny
 
     # Prevent privatization/leakage of local ranges
     private-address: 10.0.0.0/8
@@ -45,3 +47,15 @@ server:
     private-address: 169.254.0.0/16
     private-address: fd00::/8
     private-address: fe80::/8
+
+Forward Zone:
+
+    Name:"."
+
+    forward-addr: 4.2.2.2
+    forward-addr: 4.2.2.1
+    forward-first: yes
+
+
+
+
