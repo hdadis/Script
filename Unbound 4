@@ -1,0 +1,10 @@
+[Unit]
+Description=Automatic apt package update and upgrade
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/apt-auto-update.sh
+StandardOutput=journal
+StandardError=journal
