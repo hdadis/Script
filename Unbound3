@@ -1,0 +1,50 @@
+server:
+    # Listen on all interfaces
+    interface: 0.0.0.0
+    interface: ::0
+
+    # Allow access from local network - adjust subnet to match your network
+    access-control: 127.0.0.1/8 allow
+    access-control: 192.168.0.0/24 allow
+    access-control: ::1 allow
+
+    # Hide identity and version for security
+    hide-identity: yes
+    hide-version: yes
+
+    # Hardening options
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    harden-below-nxdomain: yes
+
+    # Performance and cache options
+    prefetch: yes
+    prefetch-key: yes
+    serve-expired: yes
+
+    # Logging - increase verbosity value for more detail
+    verbosity: 1
+    logfile: "/var/log/unbound/unbound.log"
+
+    # Root hints file - provided and updated by the dns-root-data package
+    root-hints: "/usr/share/dns/root.hints"
+
+    # DNSSEC trust anchor
+    auto-trust-anchor-file: "/etc/unbound/root.key"
+
+    # CA certificate bundle for TLS validation
+    tls-cert-bundle: "/etc/ssl/certs/ca-certificates.crt"
+
+forward-zone:
+    name: "."
+    forward-tls-upstream: yes
+    forward-first: no
+
+    # Cloudflare
+    forward-addr: 1.1.1.1@853#cloudflare-dns.com
+    forward-addr: 1.0.0.1@853#cloudflare-dns.com
+
+    # Quad9
+    forward-addr: 9.9.9.9@853#dns.quad9.net
+    forward-addr: 149.112.112.112@853#dns.quad9.net
+
