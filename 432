@@ -1,0 +1,23 @@
+# Audio Output ################################################################
+#
+audio_output {
+    type            "alsa"  # or "pulse" depending on your setup
+    name            "432Hz Output"
+    auto_resample   "no"
+    
+    # Enable SoX and apply the pitch shift
+    # You can specify quality parameters if needed (e.g., -v -b 24)
+    format          "44100:16:2"
+    mixer_type      "software"
+    
+    # Use SoX for the pitch adjustment
+    # Note: Modern MPD versions require the sox plugin
+    # Alternatively, you can use the SoundTouch library if available in your build
+}
+
+# Define the resampler using SoX
+resampler {
+    plugin          "sox"
+    quality         "high"
+    # Additional SoX parameters can go here
+}
