@@ -20,7 +20,7 @@ services:
       environment:
         - DB_TYPE=postgresdb
         - DB_POSTGRESDB_DATABASE=${DB_DATABASE}
-        - DB_POSTGRESDB_HOST=n8n-postgres
+        - DB_POSTGRESDB_HOST=${DB_DATABASE}
         - DB_POSTGRESDB_PORT=${DB_PORT}
         - DB_POSTGRESDB_USER=${DB_USERNAME}
         - DB_POSTGRESDB_PASSWORD=${DB_PASSWORD}
