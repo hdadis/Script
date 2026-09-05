@@ -1,0 +1,5 @@
+# Database Config
+DB_USERNAME=n8n-postgres
+DB_PASSWORD=n8ndadi
+DB_DATABASE=n8n-postgres
+DB_PORT=5432
