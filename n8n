@@ -1,125 +1,46 @@
-name: big-bear-n8n
-services:
-  app:
-    cpu_shares: 90
-    command: []
-    container_name: n8n
-    depends_on:
-      db-n8n:
-        condition: service_healthy
-        required: true
-    deploy:
-      resources:
-        limits:
-          memory: 3919M
+services:  
+  n8n-postgres:
+    image: postgres:15
+    container_name: n8n-postgres
     environment:
-      - DB_POSTGRESDB_DATABASE=n8n
-      - DB_POSTGRESDB_HOST=db-n8n
-      - DB_POSTGRESDB_PASSWORD=bigbearcasaos
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_USER=bigbearcasaos
-      - DB_TYPE=postgresdb
-      - N8N_SECURE_COOKIE=false
-      - WEBHOOK_URL=https://ai.balai.my.id/
-    hostname: n8n
-    image: n8nio/n8n:1.102.1
-    labels:
-      icon: https://cdn.jsdelivr.net/gh/selfhst/icons/png/n8n.png
-    links:
-      - db-n8n
-    ports:
-      - mode: ingress
-        target: 5678
-        published: "5678"
-        protocol: tcp
-    restart: unless-stopped
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
+      TZ: Asia/Jakarta
     volumes:
-      - type: bind
-        source: /root/.n8n
-        target: /home/node/.n8n
-        bind:
-          create_host_path: true
-    devices: []
-    cap_add: []
-    networks:
-      - default
-    privileged: false
-  db-n8n:
-    cpu_shares: 90
-    command: []
-    container_name: db-n8n
-    deploy:
-      resources:
-        limits:
-          memory: 3919M
-    environment:
-      - POSTGRES_DB=n8n
-      - POSTGRES_PASSWORD=bigbearcasaos
-      - POSTGRES_USER=bigbearcasaos
-    hostname: db-n8n
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -h localhost -U bigbearcasaos -d n8n
-      timeout: 5s
-      interval: 5s
-      retries: 10
-    image: postgres:14.2
-    labels:
-      icon: https://cdn.jsdelivr.net/gh/selfhst/icons/png/n8n.png
-    restart: on-failure
-    volumes:
-      - type: bind
-        source: /root/big-bear-n8n/pgdata
-        target: /var/lib/postgresql/data
-        bind:
-          create_host_path: true
-      - type: bind
-        source: /root/big-bear-n8n/db/init-data.sh
-        target: /docker-entrypoint-initdb.d/init-data.sh
-        bind:
-          create_host_path: true
-    ports: []
-    devices: []
-    cap_add: []
-    networks:
-      - default
-    privileged: false
-networks:
-  default:
-    name: big-bear-n8n_default
-x-casaos:
-  architectures:
-    - amd64
-    - arm64
-  author: BigBearTechWorld
-  category: BigBearCasaOS
-  description:
-    en_us: Free and open fair-code licensed node based Workflow Automation Tool.
-  developer: n8n
-  hostname: ""
-  icon: https://cdn.jsdelivr.net/gh/selfhst/icons/png/n8n.png
-  index: /
-  is_uncontrolled: true
-  main: app
-  port_map: "5678"
-  scheme: http
-  store_app_id: big-bear-n8n
-  tagline:
-    en_us: Workflow automation tool
-  thumbnail: ""
-  tips:
-    before_install:
-      en_us: >
-        Run this script:
+      - ./postgres-data:/var/lib/postgresql/data
+    restart:always
 
 
-        ```
-
-        bash -c "$(wget -qLO - https://raw.githubusercontent.com/bigbeartechworld/big-bear-scripts/master/generate-n8n-init-data/run.sh)"
-
-        ```
-  title:
-    custom: ""
-    en_us: n8n
-
+    n8n:
+      image: n8nio/n8n:1.84.1
+      container_name:n8n
+      ports:
+        - "5678:5678"
+      environment:
+        - DB_TYPE=postgresdb
+        - DB_POSTGRESDB_DATABASE=${DB_DATABASE}
+        - DB_POSTGRESDB_HOST=${DB_DATABASE}
+        - DB_POSTGRESDB_PORT=${DB_PORT}
+        - DB_POSTGRESDB_USER=${DB_USERNAME}
+        - DB_POSTGRESDB_PASSWORD=${DB_PASSWORD}
+        - TZ=Asia/Jakarta
+        - GENERIC_TIMEZONE=Asia/Jakarta
+        - NODE_NEW=production
+        - N8N_HOST=192.168.18.9
+        - N8N_PORT=5678
+        - N8N_PROTOCOL=http
+        - N8N_PUSH_BACKEND=websocket
+        - N8N_PROXY_HOPS=1
+        - N8N_SECURE_COOKIE=false
+        - N8N_EDITOR_BASE_URL=http://192.168.18.9/
+        - N8N_HIDE_WATERMARK=true
+        - WEBHOOK_URL=http://ai.balai.my.id/
+        - N8N_DEFAULT_EXECUTION_MODE=production
+        - N8N_ENFORCE_SETTINGS_FILE_PERMISSION=true
+        - N8N_RUNNERS_ENABLE=true
+      volumes:
+        - ./n8n_data:/home/node/.n8n
+      restart: unless-stopped
+      depends_on:
+        - n8n-postgres
