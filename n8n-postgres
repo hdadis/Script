@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   n8n-postgres:
-    image: postgres:14.2
+    image: postgres:15
     container_name: n8n-postgres
     environment:
       POSTGRES_USER: ${DB_USERNAME}
@@ -14,14 +14,14 @@ services:
     restart: always
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.84.1
     container_name: n8n
     ports:
       - "5678:5678"
     environment:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_DATABASE=${DB_DATABASE}
-      - DB_POSTGRESDB_HOST=${DB_HOST}
+      - DB_POSTGRESDB_HOST=n8n-postgres
       - DB_POSTGRESDB_PORT=${DB_PORT}
       - DB_POSTGRESDB_USER=${DB_USERNAME}
       - DB_POSTGRESDB_PASSWORD=${DB_PASSWORD}
