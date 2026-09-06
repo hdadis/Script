@@ -8,6 +8,7 @@ services:
       - "5678:5678"
     environment:
       - DB_TYPE=sqlite
+      - DB_SQLITE_VACUUM_ON_STARTUP=true
       - TZ=Asia/Jakarta
       - GENERIC_TIMEZONE=Asia/Jakarta
       - NODE_ENV=production
