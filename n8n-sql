@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:1.80.0 # Gunakan versi spesifik/stabil
     container_name: n8n
     ports:
       - "5678:5678"
@@ -20,9 +20,17 @@ services:
       - N8N_EDITOR_BASE_URL=http://192.168.18.9:5678/
       - N8N_HIDE_WATERMARK=true
       - WEBHOOK_URL=https://ai.balai.my.id/
-      - N8N_DEFAULT_EXECUTION_MODE=production
+      
+      # --- OPTIMASI RESOURCE UNTUK HG680-P ---
+      - N8N_RUNNERS_ENABLED=false          # Matikan runners terpisah untuk hemat RAM
+      - EXECUTIONS_DATA_PRUNE=true          # Hapus log riwayat eksekusi lama
+      - EXECUTIONS_DATA_MAX_AGE=168         # Simpan riwayat eksekusi maks 7 hari (dalam jam)
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=1000 # Maksimal jumlah riwayat tersimpan
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - N8N_RUNNERS_ENABLED=true
     volumes:
       - ./n8n_data:/home/node/.n8n
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 770M                    # Batasi penggunaan RAM agar Armbian tidak freezing
