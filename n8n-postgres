@@ -28,13 +28,13 @@ services:
       - TZ=Asia/Jakarta
       - GENERIC_TIMEZONE=Asia/Jakarta
       - NODE_ENV=production
-      - N8N_HOST=192.168.18.9
+      - N8N_HOST=ai.balai.my.id
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - N8N_PUSH_BACKEND=websocket
       - N8N_PROXY_HOPS=1
       - N8N_SECURE_COOKIE=false
-      - N8N_EDITOR_BASE_URL=http://192.168.18.9:5678/
+      - N8N_EDITOR_BASE_URL=https://ai.balai.my.id/
       - N8N_HIDE_WATERMARK=true
       - WEBHOOK_URL=https://ai.balai.my.id/
       - N8N_DEFAULT_EXECUTION_MODE=production
