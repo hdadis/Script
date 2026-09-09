@@ -4,3 +4,12 @@ DB_PASSWORD=123456Abc
 DB_DATABASE=n8n_db
 DB_HOST=n8n-postgres
 DB_PORT=5432
+# Mengaktifkan penghapusan otomatis
+EXECUTIONS_DATA_PRUNE=true
+
+# Menentukan berapa jam data eksekusi disimpan (contoh: 168 jam = 7 hari)
+EXECUTIONS_DATA_MAX_AGE=24
+
+# Menentukan jumlah maksimal eksekusi yang disimpan
+EXECUTIONS_DATA_PRUNE_MAX_COUNT=5000
+
