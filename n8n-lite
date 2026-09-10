@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  n8n-postgres:
+    image: postgres:13-alpine
+    container_name: n8n-postgres
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
+      TZ: Asia/Jakarta
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    restart: always
+
+  n8n:
+    image: n8nio/n8n:1.50.0
+    container_name: n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=${DB_DATABASE}
+      - DB_POSTGRESDB_HOST=n8n-postgres
+      - DB_POSTGRESDB_PORT=${DB_PORT}
+      - DB_POSTGRESDB_USER=${DB_USERNAME}
+      - DB_POSTGRESDB_PASSWORD=${DB_PASSWORD}
+      - TZ=Asia/Jakarta
+      - GENERIC_TIMEZONE=Asia/Jakarta
+      - NODE_ENV=production
+      - N8N_HOST=ai.balai.my.id
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_PUSH_BACKEND=websocket
+      - N8N_PROXY_HOPS=1
+      - N8N_SECURE_COOKIE=false
+      - N8N_EDITOR_BASE_URL=https://ai.balai.my.id/
+      - N8N_HIDE_WATERMARK=true
+      - WEBHOOK_URL=https://ai.balai.my.id/
+      - N8N_DEFAULT_EXECUTION_MODE=production
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    restart: unless-stopped
+    depends_on:
+      - n8n-postgres
