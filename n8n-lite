@@ -11,6 +11,8 @@ services:
       TZ: Asia/Jakarta
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
+      - ./n8n_data:/home/node/.n8n
+      - ./downloads:/data/downloads
     restart: always
 
   n8n:
