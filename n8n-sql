@@ -10,3 +10,6 @@ WEBHOOK_URL=https://balai.my.id/
 # --- Cookie Security ---
 # Set ke false agar IP lokal (HTTP) tidak terblokir warning "secure cookie"
 N8N_SECURE_COOKIE=false
+
+# --- Environment Variable Custom ---
+N8N_DOWNLOAD_PATH=/n8n/downloads
