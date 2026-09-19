@@ -12,4 +12,4 @@ WEBHOOK_URL=https://balai.my.id/
 N8N_SECURE_COOKIE=false
 
 # --- Environment Variable Custom ---
-N8N_DOWNLOAD_PATH=/n8n/downloads
+N8N_DOWNLOAD_PATH=/home/node/downloads
