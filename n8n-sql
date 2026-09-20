@@ -5,7 +5,7 @@ N8N_PORT=5678
 
 # --- URL Config ---
 # WEBHOOK_URL digunakan agar webhook penerima data mengarah ke domain publik
-WEBHOOK_URL=https://balai.my.id/
+WEBHOOK_URL=https://ai.balai.my.id/
 
 # --- Cookie Security ---
 # Set ke false agar IP lokal (HTTP) tidak terblokir warning "secure cookie"
