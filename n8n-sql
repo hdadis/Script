@@ -19,3 +19,6 @@ EXECUTIONS_DATA_MAX_AGE=5
 
 # Menentukan jumlah maksimal eksekusi yang disimpan
 EXECUTIONS_DATA_PRUNE_MAX_COUNT=15
+
+# Mengaktifkan penghapusan otomatis
+EXECUTIONS_DATA_PRUNE=true
