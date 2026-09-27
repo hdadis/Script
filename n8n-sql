@@ -13,3 +13,9 @@ N8N_SECURE_COOKIE=false
 
 # --- Environment Variable Custom ---
 N8N_DOWNLOAD_PATH=/home/node/downloads
+
+# Menentukan berapa jam data eksekusi disimpan (contoh: 168 jam = 7 hari)
+EXECUTIONS_DATA_MAX_AGE=5
+
+# Menentukan jumlah maksimal eksekusi yang disimpan
+EXECUTIONS_DATA_PRUNE_MAX_COUNT=15
