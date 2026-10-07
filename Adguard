@@ -1,0 +1,88 @@
+sudo systemctl stop AdGuardHome
+
+sudo tee /opt/AdGuardHome/data/leases.json << 'EOF'
+{"version":1,"leases":[{"expires":"","ip":"192.168.18.1","hostname":"iconnet","mac":"c0:e3:fb:1a:e5:7f","static":true},{"expires":"","ip":"192.168.18.2","hostname":"Armbian","mac":"74:51:ba:0f:2e:e1","static":true},{"expires":"","ip":"192.168.18.3","hostname":"msi-mini-pc","mac":"fc:9d:05:38:0a:2e","static":true},{"expires":"","ip":"192.168.18.4","hostname":"xiaomi-tv","mac":"78:53:33:43:29:dc","static":true},{"expires":"","ip":"192.168.18.5","hostname":"samsung-dadi","mac":"58:20:71:ec:8a:28","static":true},{"expires":"","ip":"192.168.18.6","hostname":"samsung-ika","mac":"c8:90:8a:71:ce:eb","static":true},{"expires":"","ip":"192.168.18.7","hostname":"xbox","mac":"e8:a7:2f:0a:03:3e","static":true},{"expires":"","ip":"192.168.18.8","hostname":"dell-ika","mac":"7c:70:db:2b:35:b3","static":true},{"expires":"","ip":"192.168.18.9","hostname":"infinix-ayel","mac":"4c:bb:6f:5b:64:bc","static":true},{"expires":"","ip":"192.168.18.11","hostname":"tapo-livingroom","mac":"ac:a7:f1:33:3c:4e","static":true},{"expires":"","ip":"192.168.18.12","hostname":"tapo-kitchen","mac":"f0:a7:31:36:78:db","static":true},{"expires":"","ip":"192.168.18.13","hostname":"tapo-kamar-yel","mac":"30:de:4b:a8:4d:44","static":true},{"expires":"","ip":"192.168.18.14","hostname":"tapo-parking","mac":"30:de:4b:a8:55:5f","static":true},{"expires":"","ip":"192.168.18.15","hostname":"tapo-electric-vaccum","mac":"98:25:4a:cc:15:07","static":true},{"expires":"","ip":"192.168.18.16","hostname":"tapo-electric-fish","mac":"30:de:4b:81:67:95","static":true},{"expires":"","ip":"192.168.18.17","hostname":"plug-hawhaw","mac":"38:2c:e5:0e:52:f5","static":true},{"expires":"","ip":"192.168.18.18","hostname":"makan-sula","mac":"8c:87:d0:19:e9:7d","static":true},{"expires":"","ip":"192.168.18.19","hostname":"zimaos","mac":"3c:97:0e:e8:b6:7a","static":true},{"expires":"","ip":"192.168.18.20","hostname":"hg680p-b860h","mac":"00:15:18:01:81:31","static":true},{"expires":"","ip":"192.168.18.21","hostname":"air-purifier","mac":"cc:4d:75:96:b3:b8","static":true}]}
+EOF
+
+sudo tee -a /opt/AdGuardHome/AdGuardHome.yaml << 'EOF'
+
+filters:
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt
+    name: 1Hosts (Lite)
+    id: 1791342652
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+    name: AdGuard DNS filter
+    id: 1791342653
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_59.txt
+    name: AdGuard DNS Popup Hosts filter
+    id: 1791342654
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_48.txt
+    name: HaGeZi's Pro Blocklist
+    id: 1791342655
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt
+    name: OISD Blocklist Big
+    id: 1791342656
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt
+    name: Dandelion Sprout's Anti Push Notifications
+    id: 1791342657
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt
+    name: Dandelion Sprout's Game Console Adblock List
+    id: 1791342658
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_45.txt
+    name: HaGeZi's Allowlist Referral
+    id: 1791342659
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_67.txt
+    name: HaGeZi's Apple Tracker Blocklist
+    id: 1791342660
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_47.txt
+    name: HaGeZi's Gambling Blocklist
+    id: 1791342661
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_66.txt
+    name: HaGeZi's OPPO & Realme Tracker Blocklist
+    id: 1791342662
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_61.txt
+    name: HaGeZi's Samsung Tracker Blocklist
+    id: 1791342663
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_65.txt
+    name: HaGeZi's Vivo Tracker Blocklist
+    id: 1791342664
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_63.txt
+    name: HaGeZi's Windows/Office Tracker Blocklist
+    id: 1791342665
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_60.txt
+    name: HaGeZi's Xiaomi Tracker Blocklist
+    id: 1791342666
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt
+    name: Perflyst and Dandelion Sprout's Smart-TV Blocklist
+    id: 1791342667
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_22.txt
+    name: 'IDN: ABPindo'
+    id: 1791342668
+  - enabled: true
+    url: https://raw.githubusercontent.com/hdadis/adblock-mix/refs/heads/main/ABP%20Compiled%201.txt
+    name: ABP
+    id: 1791342669
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_52.txt
+    name: HaGeZi's Encrypted DNS/VPN/TOR/Proxy Bypass
+    id: 1791370292
+EOF
+
+sudo systemctl start AdGuardHome
