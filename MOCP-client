@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Konfigurasi
+SERVER_IP="192.168.18.2"
+SERVER_USER="dadi" # Sesuaikan username di server
+REMOTE_MUSIC_DIR="/mnt/External/music" # Path folder musik di USB server
+LOCAL_MUSIC_DIR="$HOME/Music/server_sync" # Path penyimpanan lokal di client
+
+echo "[*] Memulai sinkronisasi musik dari server ($SERVER_IP)..."
+
+# Buat direktori lokal jika belum ada
+mkdir -p "$LOCAL_MUSIC_DIR"
+
+# Sinkronisasi file menggunakan rsync via SSH
+rsync -avz --delete "$SERVER_USER@$SERVER_IP:$REMOTE_MUSIC_DIR/" "$LOCAL_MUSIC_DIR/"
+
+if [ $? -eq 0 ]; then
+    echo "[+] Sinkronisasi selesai."
+    
+    # Refresh database musik MOCP lokal
+    mocp -O MusicDir="$LOCAL_MUSIC_DIR"
+    
+    # Jalankan MOCP client
+    mocp
+else
+    echo "[-] Gagal melakukan sinkronisasi dari server. Periksa koneksi jaringan."
+    exit 1
+fi
