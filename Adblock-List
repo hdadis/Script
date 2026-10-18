@@ -1,0 +1,37 @@
+{
+  "name": "Stable Blocklist",
+  "description": "Compiled & Deduplicated Blocklist from 19 sources with Microsoft Account Safe-Whitelist",
+  "homepage": "https://github.com/hdadis/adblock-mix",
+  "sources": [
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_59.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_48.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_45.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_67.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_47.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_66.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_61.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_65.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_63.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_60.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_22.txt" },
+    { "source": "https://raw.githubusercontent.com/hdadis/adblock-mix/refs/heads/main/ABP%20Compiled%201.txt" },
+    { "source": "https://adguardteam.github.io/HostlistsRegistry/assets/filter_52.txt" }
+  ],
+  "transformations": [
+    "RemoveComments",
+    "Compress",
+    "Validate",
+    "Deduplicate",
+    "RemoveEmptyLines",
+    "TrimLines"
+  ],
+  "inclusions_sources": [
+    "whitelist.txt"
+  ]
+}
