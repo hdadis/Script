@@ -13,12 +13,12 @@ MY_CHAT_ID = "509387708"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==============================================================================
-# Isi Script Cleanup.sh yang Terintegrasi
+# Isi Script Cleanup.sh yang Terintegrasi (Murni 5 Jam, Tanpa Batas Jumlah File)
 # ==============================================================================
 CLEANUP_SCRIPT_CONTENT = r"""#!/bin/bash
 
 # ==============================================================================
-# Script Pembersihan Menyeluruh, Auto-Cron & Refresh Nginx (Armbian STB HG680P)
+# Script Pembersihan Menyeluruh, Auto-Cron 5 Jam & Refresh Nginx (Armbian STB HG680P)
 # Terintegrasi: n8n Safe UI, Purge Compiler, MOCP Safe, AdGuard Clean, Nginx
 # ==============================================================================
 
@@ -28,10 +28,11 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 SCRIPT_PATH="/root/cleanup.sh"
-MAX_FILES=15
 MODE="${1:-full}"
 
 CLEAN_DIRS=(
+  "/root/n8n/downloads"
+  "/home/node/downloads"
   "/home/dadi/.n8n/binaryData"
   "/home/dadi/Downloads"
   "/var/www/n8n/downloads"
@@ -46,9 +47,18 @@ WEB_DIRS=(
 )
 
 clean_n8n_files() {
+  local FORCE_ALL="${1:-false}"
   for d in "${CLEAN_DIRS[@]}"; do
-    if [ -d "$d" ]; then
-      find "$d" -mindepth 1 -delete 2>/dev/null || true
+    # Lewati symlink agar tidak menghapus folder yang sama dua kali
+    if [ -d "$d" ] && [ ! -L "$d" ]; then
+      if [ "$FORCE_ALL" = "true" ]; then
+        # Mode paksa (--all): Hapus semua file detik ini juga
+        find "$d" -mindepth 1 -delete 2>/dev/null || true
+      else
+        # Mode reguler (5 jam): Hapus file yang umurnya > 5 jam (300 menit) + subfolder kosong
+        find "$d" -type f -mmin +300 -delete 2>/dev/null || true
+        find "$d" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+      fi
     fi
   done
 }
@@ -78,29 +88,10 @@ refresh_nginx_web() {
 }
 
 # ------------------------------------------------------------------------------
-# MODE CEPAT 1 (Dipanggil lewat perintah 'refresh-web'): Hanya Refresh Nginx
+# MODE CEPAT (Dipanggil lewat perintah 'refresh-web'): Hanya Refresh Nginx
 # ------------------------------------------------------------------------------
 if [ "$MODE" = "--web-only" ]; then
   refresh_nginx_web
-  exit 0
-fi
-
-# ------------------------------------------------------------------------------
-# MODE CEPAT 2 (Dipanggil tiap 10 menit oleh Cron): Cek kuota maksimal 15 file
-# ------------------------------------------------------------------------------
-if [ "$MODE" = "--quota-only" ]; then
-  TOTAL_FILES=0
-  for d in "${CLEAN_DIRS[@]}"; do
-    if [ -d "$d" ]; then
-      COUNT=$(find "$d" -type f 2>/dev/null | wc -l)
-      TOTAL_FILES=$((TOTAL_FILES + COUNT))
-    fi
-  done
-
-  if [ "$TOTAL_FILES" -gt "$MAX_FILES" ]; then
-    clean_n8n_files
-    find /tmp -mindepth 1 -maxdepth 1 ! -name 'moc*' ! -name 'systemd-private*' -mmin +10 -exec rm -rf {} + 2>/dev/null || true
-  fi
   exit 0
 fi
 
@@ -121,16 +112,22 @@ sudo /bin/bash /root/cleanup.sh --web-only
 EOS
 chmod +x /usr/local/bin/refresh-web
 
-rm -f /etc/cron.d/n8n-cleaner /usr/local/bin/n8n-cleaner.sh /root/refresh.sh 2>/dev/null || true
+cat << 'EOS' > /usr/local/bin/clean-stb
+#!/bin/bash
+sudo /bin/bash /root/cleanup.sh "$@"
+EOS
+chmod +x /usr/local/bin/clean-stb
 
-# 1. Fitur Otomatisasi Cron (Setiap 5 jam & cek kuota 15 file tiap 10 menit)
-echo "[+] Memperbarui jadwal otomatis di Cron (Setiap 5 Jam & Kuota $MAX_FILES File)..."
+# Hapus file cron lama yang duplikat agar tidak bentrok
+rm -f /etc/cron.d/n8n-cleaner /etc/cron.d/n8n-download-limiter /etc/cron.daily/n8n-cleaner /usr/local/bin/n8n-cleaner.sh /usr/local/bin/limit-downloads /root/refresh.sh 2>/dev/null || true
+
+# 1. Fitur Otomatisasi Cron (Murni setiap 5 jam, TANPA batasan jumlah file)
+echo "[+] Memperbarui jadwal otomatis di Cron (Setiap 5 Jam, Tanpa Batas Jumlah File)..."
 (
   crontab -l 2>/dev/null | grep -v "$SCRIPT_PATH" || true
   echo "0 */5 * * * /bin/bash $SCRIPT_PATH >/dev/null 2>&1"
-  echo "*/10 * * * * /bin/bash $SCRIPT_PATH --quota-only >/dev/null 2>&1"
 ) | crontab -
-echo "[+] Berhasil! Pembersihan otomatis tiap 5 jam & penjaga kuota $MAX_FILES file aktif."
+echo "[+] Berhasil! Pembersihan otomatis tiap 5 jam telah aktif."
 
 echo "[+] Memulai pembersihan menyeluruh sistem Armbian..."
 echo "--------------------------------------------------"
@@ -152,13 +149,18 @@ if [ -f /swapfile ]; then
   fi
 fi
 
-# 3. Membersihkan semua file unduhan / binary tersimpan n8n
-echo "[+] Menghapus semua file unduhan & binary tersimpan n8n..."
-clean_n8n_files
+# 3. Membersihkan file unduhan / binary tersimpan n8n
+if [ "$MODE" = "--all" ]; then
+  echo "[+] Menghapus SEMUA file unduhan & binary tersimpan n8n (Mode Paksa)..."
+  clean_n8n_files "true"
+else
+  echo "[+] Menghapus file unduhan & binary tersimpan n8n yang berumur > 5 jam..."
+  clean_n8n_files "false"
+fi
 
 # 4. Hapus paket kompilator (build-essential ~200MB) HANYA jika n8n sudah terinstal
 if command -v n8n >/dev/null 2>&1; then
-  if dpkg -l | grep -q "^ii  build-essential"; then
+  if dpkg -l | grep -qE "^ii\s+build-essential"; then
     echo "[+] n8n sudah terinstal! Menghapus build-essential (gcc/g++) untuk hemat ~200MB..."
     apt-get remove --purge -y build-essential g++ gcc dpkg-dev >/dev/null 2>&1 || true
   fi
@@ -203,11 +205,12 @@ fi
 if command -v pm2 &> /dev/null; then
   echo "[+] Membersihkan log PM2 (root & user n8n)..."
   pm2 flush > /dev/null 2>&1 || true
+  find /root/.pm2/logs -type f -name "*.log" -exec truncate -s 0 {} + 2>/dev/null || true
   for u in /home/*; do
     USERNAME=$(basename "$u")
     if [ -d "$u/.pm2" ]; then
       su - "$USERNAME" -c "pm2 flush >/dev/null 2>&1" || true
-      rm -rf "$u/.pm2/logs/*" 2>/dev/null || true
+      find "$u/.pm2/logs" -type f -name "*.log" -exec truncate -s 0 {} + 2>/dev/null || true
     fi
   done
 fi
@@ -236,8 +239,8 @@ echo "Status RAM & Swap Saat Ini:"
 free -h
 echo "--------------------------------------------------"
 echo "[+] PEMBERSIHAN & REFRESH NGINX SELESAI!"
-echo "[+] Jadwal otomatis: Tiap 5 jam (Full) | Tiap 10 menit (Kuota $MAX_FILES file)."
-echo "[+] Ketik 'refresh-web' kapan saja untuk refresh cepat Nginx."
+echo "[+] Jadwal otomatis: Tiap 5 jam (Tanpa batas jumlah file)."
+echo "[+] Perintah cepat : 'clean-stb' (bersih >5 jam) | 'clean-stb --all' (sapu bersih semua) | 'refresh-web'."
 echo "--------------------------------------------------"
 """
 
@@ -462,7 +465,8 @@ def send_welcome(message):
         "➡️ /devicesconnected - Pemindaian perangkat di LAN\n"
         "➡️ /armbianstatus - Ringkasan lengkap status server\n"
         "➡️ /run <perintah> - Jalankan perintah terminal\n"
-        "➡️ /cleancache - Pembersihan menyeluruh, Nginx & cek disk\n"
+        "➡️ /cleancache - Pembersihan (>5 jam), Nginx & cek disk\n"
+        "➡️ /cleancache all - Sapu bersih semua file unduhan sekarang\n"
         "➡️ /restartservices - Restart service smbd & cups"
     )
     bot.reply_to(message, menu, parse_mode="Markdown")
@@ -533,7 +537,13 @@ def execute_clean_cache(message):
         bot.reply_to(message, "⛔ Anda tidak memiliki akses untuk menjalankan perintah ini.")
         return
     
-    bot.reply_to(message, "⚙️ Memperbarui `/root/cleanup.sh` & menjalankan pembersihan menyeluruh...", parse_mode="Markdown")
+    arg_text = message.text.replace("/cleancache", "").replace("/CleanCache", "").strip().lower()
+    cmd_args = ["sudo", "/bin/bash", "/root/cleanup.sh"]
+    if arg_text in ["all", "--all", "force"]:
+        cmd_args.append("--all")
+        bot.reply_to(message, "⚙️ Memperbarui `/root/cleanup.sh` & menyapu bersih SEMUA file unduhan sekarang...", parse_mode="Markdown")
+    else:
+        bot.reply_to(message, "⚙️ Memperbarui `/root/cleanup.sh` & menjalankan pembersihan menyeluruh (file > 5 jam)...", parse_mode="Markdown")
     
     try:
         # Tulis/update file /root/cleanup.sh secara otomatis via sudo tee
@@ -549,7 +559,7 @@ def execute_clean_cache(message):
         
         # Jalankan script cleanup.sh
         output = subprocess.check_output(
-            ["sudo", "/bin/bash", "/root/cleanup.sh"],
+            cmd_args,
             stderr=subprocess.STDOUT,
             text=True,
             timeout=180
