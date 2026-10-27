@@ -1,0 +1,127 @@
+cd ~/excel-bot
+source venv/bin/activate
+pip install -q --upgrade anthropic openpyxl
+
+cat << 'EOF' > claude_excel.py
+import os
+import sys
+import re
+import subprocess
+import anthropic
+
+API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+if not API_KEY:
+    print("\n[!] ERROR: ANTHROPIC_API_KEY belum diatur!")
+    sys.exit(1)
+
+client = anthropic.Anthropic(api_key=API_KEY)
+MODEL = "claude-opus-5-5"
+MAX_PERCOBAAN = 3
+
+print("=" * 70)
+print("   EXCEL BUILDER (LANGSUNG JADI .XLSX)")
+print("=" * 70)
+print("Paste soal Anda, lalu ketik SELESAI di baris baru dan tekan ENTER:")
+print("-" * 70)
+
+baris_soal = []
+while True:
+    try:
+        baris = input()
+    except EOFError:
+        break
+    if baris.strip().upper() == "SELESAI":
+        break
+    baris_soal.append(baris)
+
+soal_user = "\n".join(baris_soal).strip()
+if not soal_user:
+    print("\n[!] Soal kosong. Batal.")
+    sys.exit(1)
+
+nama_output = input("\nNama file Excel output (Contoh: Jawaban.xlsx): ").strip()
+if not nama_output:
+    nama_output = "Jawaban.xlsx"
+if not nama_output.lower().endswith(".xlsx"):
+    nama_output += ".xlsx"
+
+prompt_sistem = f"""You are a Python openpyxl script generator. Read the business case study and output ONLY a valid, complete Python script using `openpyxl` that saves an Excel file named `{nama_output}` in the current working directory.
+
+RULES:
+1. Build a professional spreadsheet: clear input/assumption cells, tables, number formatting, column widths, and ACTIVE EXCEL FORMULAS (=SUM, =A1-B1, variance, etc.) instead of hardcoded results.
+2. Use only openpyxl and the Python standard library.
+3. Always end the script with wb.save("{nama_output}").
+4. Output NO text outside the code. Your entire response must be one ```python code block, and the script must be complete (not truncated)."""
+
+
+def minta_kode(messages):
+    """Panggil Claude dengan streaming, kembalikan (teks, stop_reason)."""
+    with client.messages.stream(
+        model=MODEL,
+        max_tokens=32000,
+        system=prompt_sistem,
+        messages=messages,
+    ) as stream:
+        pesan = stream.get_final_message()
+    teks = "".join(b.text for b in pesan.content if getattr(b, "type", "") == "text")
+    return teks, pesan.stop_reason
+
+
+def ekstrak_kode(teks):
+    m = re.search(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", teks, re.DOTALL)
+    if m:
+        return m.group(1)
+    # Fallback: tidak ada penutup (kemungkinan terpotong) -> buang backtick saja
+    return re.sub(r"```(?:python|py)?", "", teks)
+
+
+messages = [{"role": "user", "content": soal_user}]
+
+try:
+    for percobaan in range(1, MAX_PERCOBAAN + 1):
+        print(f"\n[*] Percobaan {percobaan}/{MAX_PERCOBAAN}: meminta Claude merakit script Excel...")
+        teks, stop = minta_kode(messages)
+
+        if stop == "max_tokens":
+            print("[!] Peringatan: respons terpotong (max_tokens). Script mungkin tidak lengkap.")
+
+        kode = ekstrak_kode(teks)
+        with open("_temp_builder.py", "w", encoding="utf-8") as f:
+            f.write(kode)
+
+        if os.path.exists(nama_output):
+            os.remove(nama_output)
+
+        print("[*] Menjalankan script perakit Excel...")
+        hasil = subprocess.run(
+            [sys.executable, "_temp_builder.py"],
+            capture_output=True, text=True, timeout=180
+        )
+
+        if hasil.returncode == 0 and os.path.exists(nama_output):
+            print(f"\n[✓] BERHASIL! File: {os.path.abspath(nama_output)}")
+            sys.exit(0)
+
+        error_msg = (hasil.stderr or hasil.stdout or "File output tidak terbentuk.").strip()
+        print("\n[!] Script gagal dijalankan. Error:\n" + error_msg[-1500:])
+
+        # Kirim error balik ke Claude agar diperbaiki
+        messages.append({"role": "assistant", "content": teks})
+        messages.append({
+            "role": "user",
+            "content": f"Script tadi gagal dengan error berikut:\n\n{error_msg[-3000:]}\n\n"
+                       f"Perbaiki dan keluarkan ulang script LENGKAP dalam satu blok ```python."
+        })
+
+    print("\n[!] Gagal setelah beberapa percobaan. Kode terakhir ada di '_temp_builder.py'.")
+    sys.exit(1)
+
+except anthropic.APIError as e:
+    print(f"\n[!] Error API: {e}")
+    sys.exit(1)
+except subprocess.TimeoutExpired:
+    print("\n[!] Script builder terlalu lama (timeout).")
+    sys.exit(1)
+EOF
+
+echo "[✓] Script siap! Jalankan: python claude_excel.py"
