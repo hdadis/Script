@@ -1,0 +1,259 @@
+cd ~/excel-bot
+source venv/bin/activate
+pip install -q --upgrade anthropic openpyxl python-docx
+
+cat << 'EOF' > claude_excel.py
+import os
+import sys
+import re
+import subprocess
+import anthropic
+from docx import Document
+from docx.shared import Pt
+
+API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+if not API_KEY:
+    print("\n[!] ERROR: ANTHROPIC_API_KEY belum diatur!")
+    sys.exit(1)
+
+client = anthropic.Anthropic(api_key=API_KEY)
+MODEL = "claude-opus-5-5"
+MAX_PERCOBAAN = 3
+
+print("=" * 70)
+print("   EXCEL + ANALISIS BUILDER (.xlsx + .docx)")
+print("=" * 70)
+print("Paste soal Anda, lalu ketik SELESAI di baris baru dan tekan ENTER:")
+print("-" * 70)
+
+baris_soal = []
+while True:
+    try:
+        baris = input()
+    except EOFError:
+        break
+    if baris.strip().upper() == "SELESAI":
+        break
+    baris_soal.append(baris)
+
+soal_user = "\n".join(baris_soal).strip()
+if not soal_user:
+    print("\n[!] Soal kosong. Batal.")
+    sys.exit(1)
+
+nama_output = input("\nNama file Excel output (Contoh: Jawaban.xlsx): ").strip()
+if not nama_output:
+    nama_output = "Jawaban.xlsx"
+if not nama_output.lower().endswith(".xlsx"):
+    nama_output += ".xlsx"
+dasar = nama_output[:-5]
+nama_md = dasar + "_Analisis.md"
+nama_docx = dasar + "_Analisis.docx"
+
+PROMPT_NARASI = """Anda adalah analis keuangan senior. Jawab studi kasus berikut dalam Bahasa Indonesia
+dengan format Markdown yang rapi dan lengkap:
+
+1. Ringkasan soal dan asumsi yang dipakai
+2. Langkah perhitungan (tampilkan rumus dan angka per langkah)
+3. Tabel hasil perhitungan
+4. Analisis dan interpretasi hasil
+5. Kesimpulan dan rekomendasi
+
+Tampilkan semua angka dengan jelas dan konsisten."""
+
+PROMPT_EXCEL = f"""You are a Python openpyxl script generator. You are given a business case study AND a completed written analysis of it. Output ONLY a valid, complete Python script using `openpyxl` that saves an Excel file named `{nama_output}` in the current working directory.
+
+RULES:
+1. Build a professional spreadsheet: clear input/assumption cells, tables, number formatting, column widths, and ACTIVE EXCEL FORMULAS (=SUM, =A1-B1, variance, etc.) instead of hardcoded results.
+2. The numbers and structure must match the written analysis exactly.
+3. Include a sheet named "Analisis" containing the key conclusions and recommendations from the written analysis (as wrapped text).
+4. Use only openpyxl and the Python standard library.
+5. Always end the script with wb.save("{nama_output}").
+6. Output NO text outside the code. Your entire response must be one ```python code block, and the script must be complete (not truncated)."""
+
+
+def panggil(system, messages):
+    with client.messages.stream(
+        model=MODEL,
+        max_tokens=32000,
+        system=system,
+        messages=messages,
+    ) as stream:
+        pesan = stream.get_final_message()
+    teks = "".join(b.text for b in pesan.content if getattr(b, "type", "") == "text")
+    return teks, pesan.stop_reason
+
+
+def ekstrak_kode(teks):
+    m = re.search(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", teks, re.DOTALL)
+    if m:
+        return m.group(1)
+    return re.sub(r"```(?:python|py)?", "", teks)
+
+
+# ---------- MARKDOWN -> DOCX ----------
+def tambah_teks_inline(paragraf, teks):
+    """Tangani **tebal**, *miring*, dan `kode` di dalam satu baris."""
+    bagian = re.split(r"(\*\*.+?\*\*|`.+?`|\*.+?\*)", teks)
+    for b in bagian:
+        if not b:
+            continue
+        if b.startswith("**") and b.endswith("**") and len(b) > 4:
+            paragraf.add_run(b[2:-2]).bold = True
+        elif b.startswith("`") and b.endswith("`") and len(b) > 2:
+            r = paragraf.add_run(b[1:-1])
+            r.font.name = "Consolas"
+        elif b.startswith("*") and b.endswith("*") and len(b) > 2:
+            paragraf.add_run(b[1:-1]).italic = True
+        else:
+            paragraf.add_run(b)
+
+
+def pisah_sel(baris):
+    return [s.strip() for s in baris.strip().strip("|").split("|")]
+
+
+def md_ke_docx(md, path):
+    doc = Document()
+    doc.styles["Normal"].font.name = "Calibri"
+    doc.styles["Normal"].font.size = Pt(11)
+
+    baris = md.splitlines()
+    i = 0
+    while i < len(baris):
+        b = baris[i].rstrip()
+        s = b.strip()
+
+        if not s:
+            i += 1
+            continue
+
+        # Tabel Markdown
+        if s.startswith("|") and i + 1 < len(baris) and re.match(r"^\s*\|?[\s:\-|]+\|?\s*$", baris[i + 1]):
+            header = pisah_sel(s)
+            i += 2
+            isi = []
+            while i < len(baris) and baris[i].strip().startswith("|"):
+                isi.append(pisah_sel(baris[i]))
+                i += 1
+            tabel = doc.add_table(rows=1, cols=len(header))
+            tabel.style = "Table Grid"
+            for j, h in enumerate(header):
+                sel = tabel.rows[0].cells[j]
+                sel.text = ""
+                tambah_teks_inline(sel.paragraphs[0], h)
+                for r in sel.paragraphs[0].runs:
+                    r.bold = True
+            for row in isi:
+                cells = tabel.add_row().cells
+                for j in range(len(header)):
+                    cells[j].text = ""
+                    tambah_teks_inline(cells[j].paragraphs[0], row[j] if j < len(row) else "")
+            doc.add_paragraph()
+            continue
+
+        # Heading
+        m = re.match(r"^(#{1,6})\s+(.*)$", s)
+        if m:
+            doc.add_heading(m.group(2).replace("**", ""), level=min(len(m.group(1)), 4))
+            i += 1
+            continue
+
+        # Garis pemisah
+        if re.match(r"^(-{3,}|\*{3,}|_{3,})$", s):
+            i += 1
+            continue
+
+        # Daftar bernomor
+        m = re.match(r"^\d+[.)]\s+(.*)$", s)
+        if m:
+            p = doc.add_paragraph(style="List Number")
+            tambah_teks_inline(p, m.group(1))
+            i += 1
+            continue
+
+        # Daftar bullet
+        m = re.match(r"^[-*+]\s+(.*)$", s)
+        if m:
+            p = doc.add_paragraph(style="List Bullet")
+            tambah_teks_inline(p, m.group(1))
+            i += 1
+            continue
+
+        # Paragraf biasa
+        p = doc.add_paragraph()
+        tambah_teks_inline(p, s)
+        i += 1
+
+    doc.save(path)
+
+
+try:
+    # ---------- TAHAP 1: NARASI ----------
+    print("\n[1/2] Menyusun narasi analisis...")
+    narasi, stop = panggil(PROMPT_NARASI, [{"role": "user", "content": soal_user}])
+    if stop == "max_tokens":
+        print("[!] Peringatan: narasi terpotong (max_tokens).")
+
+    with open(nama_md, "w", encoding="utf-8") as f:
+        f.write(narasi)
+    try:
+        md_ke_docx(narasi, nama_docx)
+        print(f"[✓] Narasi Word : {os.path.abspath(nama_docx)}")
+    except Exception as e:
+        print(f"[!] Gagal membuat .docx ({e}). File .md tetap tersimpan: {os.path.abspath(nama_md)}")
+
+    # ---------- TAHAP 2: EXCEL ----------
+    print("\n[2/2] Merakit file Excel...")
+    isi_user = (
+        f"=== SOAL ===\n{soal_user}\n\n"
+        f"=== ANALISIS TERTULIS (acuan angka) ===\n{narasi}"
+    )
+    messages = [{"role": "user", "content": isi_user}]
+
+    for percobaan in range(1, MAX_PERCOBAAN + 1):
+        print(f"    Percobaan {percobaan}/{MAX_PERCOBAAN}...")
+        teks, stop = panggil(PROMPT_EXCEL, messages)
+        if stop == "max_tokens":
+            print("    [!] Respons terpotong, script mungkin tidak lengkap.")
+
+        kode = ekstrak_kode(teks)
+        with open("_temp_builder.py", "w", encoding="utf-8") as f:
+            f.write(kode)
+
+        if os.path.exists(nama_output):
+            os.remove(nama_output)
+
+        hasil = subprocess.run(
+            [sys.executable, "_temp_builder.py"],
+            capture_output=True, text=True, timeout=180
+        )
+
+        if hasil.returncode == 0 and os.path.exists(nama_output):
+            print(f"\n[✓] SELESAI!")
+            print(f"    Excel : {os.path.abspath(nama_output)}")
+            print(f"    Word  : {os.path.abspath(nama_docx)}")
+            sys.exit(0)
+
+        error_msg = (hasil.stderr or hasil.stdout or "File output tidak terbentuk.").strip()
+        print("    [!] Script gagal. Error:\n" + error_msg[-1500:])
+
+        messages.append({"role": "assistant", "content": teks})
+        messages.append({
+            "role": "user",
+            "content": f"Script tadi gagal dengan error:\n\n{error_msg[-3000:]}\n\n"
+                       f"Perbaiki dan keluarkan ulang script LENGKAP dalam satu blok ```python."
+        })
+
+    print(f"\n[!] Excel gagal dibuat. Narasi tetap tersimpan di '{nama_docx}' dan '{nama_md}'.")
+    sys.exit(1)
+
+except anthropic.APIError as e:
+    print(f"\n[!] Error API: {e}")
+    sys.exit(1)
+except subprocess.TimeoutExpired:
+    print("\n[!] Script builder terlalu lama (timeout).")
+    sys.exit(1)
+EOF
+
+echo "[✓] Script siap! Jalankan: python claude_excel.py"
