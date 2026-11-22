@@ -1,0 +1,617 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+denah_gemini.py  —  Diagram Radar Lokasi Strategis (Armbian HG680P)
+
+Cara pakai:
+    python3 denah_gemini.py                       # lalu ketik koordinat saat ditanya
+    python3 denah_gemini.py "6°23'22.8\"S 106°44'21.8\"E" 4
+    python3 denah_gemini.py "-6.389667, 106.739389" 3
+
+Pembagian kerja:
+  * Gemini (gemini-3.7-flash + Google Search) -> mencari fasilitas NYATA, koordinat,
+    dan perkiraan kawasan (JSON).
+  * Script ini -> menghitung jarak (haversine) & arah (bearing) sendiri, memberi nomor,
+    merender PNG 3840x3840 @400 DPI dengan matplotlib (bukan AI image generator),
+    menulis TXT, lalu mengirim keduanya ke 192.168.18.2:/mnt/External/Downloads/IDM.
+
+Kebutuhan (sekali saja):
+    apt update && apt install -y python3-matplotlib python3-pil openssh-client
+    (atau: pip3 install matplotlib pillow --break-system-packages)
+"""
+import os
+import re
+import sys
+import json
+import math
+import time
+import subprocess
+import datetime
+import urllib.request
+import urllib.error
+
+# ========================= PENGATURAN — ubah di sini =========================
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.7-flash")
+
+# 6 API key Gemini -> 6 kali percobaan (tiap percobaan pakai key berikutnya).
+# Boleh juga lewat env: export GEMINI_KEYS="key1,key2,key3,key4,key5,key6"
+GEMINI_KEYS = [
+    "isi",
+    "isi",
+    "isi",
+    "isi",
+    "isi",
+    "isi",
+]
+
+REMOTE_HOST = "root@192.168.18.2"
+REMOTE_DIR = "/mnt/External/Downloads/IDM"
+LOCAL_DIR = os.path.expanduser("~/denah_hasil")   # salinan lokal / cadangan bila kirim gagal
+RADIUS_DEFAULT = 4.0
+MAKS_FASILITAS = 7
+# =============================================================================
+
+PNG_NAME = "diagram_radar_lokasi_strategis.png"
+TXT_NAME = "keterangan_lokasi_strategis.txt"
+
+KATEGORI_VALID = ["sekolah", "universitas", "rumah sakit", "kantor polisi", "mall",
+                  "tempat hiburan", "restoran", "rekreasi", "pasar", "terminal",
+                  "stasiun", "bandara"]
+KAT_DISPLAY = {k: k.title() for k in KATEGORI_VALID}
+KAT_ALIAS = {
+    "sd": "sekolah", "smp": "sekolah", "sma": "sekolah", "smk": "sekolah",
+    "kampus": "universitas", "perguruan tinggi": "universitas",
+    "rs": "rumah sakit", "rumahsakit": "rumah sakit", "klinik": None,
+    "polsek": "kantor polisi", "polres": "kantor polisi", "polisi": "kantor polisi",
+    "pusat perbelanjaan": "mall", "mal": "mall", "plaza": "mall",
+    "hiburan": "tempat hiburan", "bioskop": "tempat hiburan",
+    "rumah makan": "restoran", "kafe": "restoran", "cafe": "restoran",
+    "taman": "rekreasi", "wisata": "rekreasi", "tempat wisata": "rekreasi",
+    "pasar tradisional": "pasar", "krl": "stasiun", "stasiun kereta": "stasiun",
+    "terminal bus": "terminal", "bandar udara": "bandara",
+}
+
+# Warna kategori (hex)
+WARNA = {
+    "mall": "#F59E0B", "rumah sakit": "#D91B7A", "stasiun": "#38BDF8",
+    "terminal": "#38BDF8", "rekreasi": "#10B981", "sekolah": "#A78BFA",
+    "universitas": "#A78BFA", "pasar": "#FB7185", "kantor polisi": "#2563EB",
+    "tempat hiburan": "#F97316", "restoran": "#A3E635", "bandara": "#E2E8F0",
+}
+GRUP_LEGENDA = {  # warna -> urutan kategori dalam satu blok legenda
+    "#38BDF8": ["stasiun", "terminal"],
+    "#A78BFA": ["sekolah", "universitas"],
+}
+
+BG = "#0B1120"
+ARAH8 = ["U", "TL", "T", "TG", "S", "BD", "B", "BL"]
+BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli",
+         "Agustus", "September", "Oktober", "November", "Desember"]
+
+
+# ----------------------------- koordinat & geometri -----------------------------
+def parse_koordinat(s):
+    s = (s.strip().strip("'").strip('"')
+         .replace("′", "'").replace("’", "'").replace("‘", "'")
+         .replace("″", '"').replace("”", '"').replace("“", '"').replace("º", "°"))
+    dms = re.findall(
+        r"(\d+(?:[.,]\d+)?)\s*°\s*(\d+(?:[.,]\d+)?)\s*'\s*(\d+(?:[.,]\d+)?)\s*(?:\"|'')?\s*"
+        r"(LU|LS|BT|BB|[NSEW])?", s, flags=re.I)
+    if len(dms) >= 2:
+        nilai = []
+        for d, m, sec, h in dms[:2]:
+            v = (float(d.replace(",", ".")) + float(m.replace(",", ".")) / 60
+                 + float(sec.replace(",", ".")) / 3600)
+            h = h.upper()
+            if h in ("S", "W", "LS", "BB"):
+                v = -v
+            nilai.append((v, h))
+        (a, ha), (b, hb) = nilai
+        if ha in ("E", "W", "BT", "BB") or hb in ("N", "S", "LU", "LS"):
+            a, b = b, a
+        lat, lon = a, b
+    else:
+        bagian = [p for p in re.split(r"\s*;\s*|,\s+|\s+", s) if p]
+        if len(bagian) < 2:
+            raise ValueError("Format koordinat tidak dikenali")
+        lat, lon = float(bagian[0].replace(",", ".")), float(bagian[1].replace(",", "."))
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError("Koordinat di luar jangkauan")
+    return lat, lon
+
+
+def to_dms(val, pos, neg):
+    h = pos if val >= 0 else neg
+    v = abs(val)
+    d = int(v)
+    m = int((v - d) * 60)
+    sec = round(((v - d) * 60 - m) * 60, 1)
+    if sec >= 60:
+        sec -= 60
+        m += 1
+    if m >= 60:
+        m -= 60
+        d += 1
+    return f"{d}°{m}'{sec:.1f}\"{h}"
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    r = 6371.0088
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def bearing_deg(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def arah_detail(b):
+    return ARAH8[int(round(b / 45.0)) % 8]
+
+
+def sektor(b):
+    if b >= 315 or b < 45:
+        return "UTARA"
+    if b < 135:
+        return "TIMUR"
+    if b < 225:
+        return "SELATAN"
+    return "BARAT"
+
+
+def fmt_km(d):
+    return f"{d:.2f}".replace(".", ",")
+
+
+def fmt_r(r):
+    return f"{r:g}".replace(".", ",")
+
+
+def tanggal_id():
+    n = datetime.date.today()
+    return f"{n.day} {BULAN[n.month - 1]} {n.year}"
+
+
+# ----------------------------------- Gemini -----------------------------------
+def buat_prompt(lat, lon, radius):
+    return f"""Kamu asisten analisis lokasi properti Indonesia. Gunakan Google Search / Google Maps untuk data NYATA.
+
+TITIK RUMAH (desimal): {lat:.6f}, {lon:.6f}
+RADIUS_MAKSIMAL: {radius:g} km (jarak garis lurus dari titik rumah)
+
+TUGAS:
+1. Tentukan perkiraan kawasan titik tersebut: kelurahan/desa, kecamatan, kota/kabupaten, provinsi.
+2. Cari fasilitas nyata PALING STRATEGIS di dalam radius {radius:g} km, hanya dari 12 kategori ini:
+   sekolah, universitas, rumah sakit, kantor polisi, mall, tempat hiburan, restoran, rekreasi, pasar, terminal, stasiun, bandara.
+   Berikan sampai 12 kandidat, DIURUTKAN dari yang paling strategis (prioritaskan fasilitas besar/terkenal,
+   sebarkan ke berbagai kategori dan berbagai arah mata angin, bukan satu kategori saja).
+3. Untuk tiap fasilitas beri koordinat Google Maps (lat, lon, 6 desimal) yang akurat.
+
+ATURAN KETAT:
+- DILARANG mengarang fasilitas atau koordinat. Jangan masukkan tempat di luar radius atau di luar 12 kategori.
+- Nama tempat resmi, singkat (maks 40 karakter), tanpa alamat.
+- Nilai "kategori" HARUS persis salah satu dari 12 kategori di atas (huruf kecil).
+- Balas HANYA JSON valid, tanpa markdown, tanpa penjelasan, dengan struktur:
+{{"kawasan": {{"kelurahan": "", "kecamatan": "", "kota_kabupaten": "Kota/Kabupaten ...", "provinsi": ""}},
+  "fasilitas": [{{"nama": "", "kategori": "", "lat": 0.0, "lon": 0.0}}]}}"""
+
+
+def panggil_gemini(key, prompt):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"google_search": {}}],
+    }
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode("utf-8"), method="POST",
+        headers={"Content-Type": "application/json", "x-goog-api-key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        isi = e.read().decode("utf-8", "ignore")
+        try:
+            isi = json.loads(isi)["error"]["message"]
+        except Exception:
+            pass
+        raise RuntimeError(f"HTTP {e.code}: {str(isi)[:200]}")
+    cands = data.get("candidates") or []
+    if not cands:
+        raise RuntimeError(f"Tidak ada kandidat jawaban ({data.get('promptFeedback')})")
+    parts = (cands[0].get("content") or {}).get("parts") or []
+    teks = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+    if not teks.strip():
+        raise RuntimeError("Jawaban kosong")
+    return teks
+
+
+def ekstrak_json(teks):
+    a, b = teks.find("{"), teks.rfind("}")
+    if a < 0 or b <= a:
+        raise ValueError("JSON tidak ditemukan")
+    return json.loads(teks[a:b + 1])
+
+
+def normal_kategori(k):
+    k = (k or "").strip().lower()
+    if k in KATEGORI_VALID:
+        return k
+    return KAT_ALIAS.get(k)
+
+
+def olah_hasil(js, lat0, lon0, radius):
+    kw = js.get("kawasan") or {}
+    bagian = []
+    if kw.get("kelurahan"):
+        bagian.append(f"Kel. {kw['kelurahan']}")
+    if kw.get("kecamatan"):
+        bagian.append(f"Kec. {kw['kecamatan']}")
+    if kw.get("kota_kabupaten"):
+        bagian.append(str(kw["kota_kabupaten"]))
+    if kw.get("provinsi"):
+        bagian.append(str(kw["provinsi"]))
+    kawasan = ", ".join(bagian) if bagian else "Tidak teridentifikasi"
+
+    kandidat, terlihat = [], set()
+    for f in js.get("fasilitas") or []:
+        try:
+            nama = str(f["nama"]).strip()
+            kat = normal_kategori(f.get("kategori"))
+            lat, lon = float(f["lat"]), float(f["lon"])
+        except Exception:
+            continue
+        if not nama or not kat or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            continue
+        if nama.lower() in terlihat:
+            continue
+        d = haversine_km(lat0, lon0, lat, lon)
+        if d > radius or d < 0.02:     # di luar radius (dihitung ulang oleh script)
+            continue
+        terlihat.add(nama.lower())
+        kandidat.append({"nama": nama, "kat": kat, "lat": lat, "lon": lon, "d": d,
+                         "b": bearing_deg(lat0, lon0, lat, lon)})
+    pilih = kandidat[:MAKS_FASILITAS]          # urutan Gemini = urutan strategis
+    pilih.sort(key=lambda x: x["d"])           # nomor 1..N dari yang terdekat
+    for i, f in enumerate(pilih, 1):
+        f["no"] = i
+        f["arah"] = arah_detail(f["b"])
+    return kawasan, pilih
+
+
+# ----------------------------------- render PNG -----------------------------------
+def lum(h):
+    c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    c = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def render_png(path, lat, lon, radius, kawasan, fasilitas):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle, FancyBboxPatch, Rectangle
+
+    W = H = 3840
+    DPI = 400
+
+    def pt(px):
+        return px * 72.0 / DPI
+
+    fig = plt.figure(figsize=(W / DPI + 1e-6, H / DPI + 1e-6), dpi=DPI, facecolor=BG)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, W)
+    ax.set_ylim(H, 0)
+    ax.axis("off")
+    rend = fig.canvas.get_renderer()
+
+    def tw(s, px):
+        t = ax.text(0, 0, s, fontsize=pt(px), fontweight="bold")
+        w = t.get_window_extent(rend).width
+        t.remove()
+        return w
+
+    def fit(s, max_w, px, min_px=26):
+        while tw(s, px) > max_w and px > min_px:
+            px *= 0.96
+        return px
+
+    def wrap(s, px, max_w):
+        out, cur = [], ""
+        for w in s.split():
+            t = (cur + " " + w).strip()
+            if cur and tw(t, px) > max_w:
+                out.append(cur)
+                cur = w
+            else:
+                cur = t
+        out.append(cur)
+        return out
+
+    def text(x, y, s, px, color, ha="center", z=20):
+        ax.text(x, y, s, fontsize=pt(px), fontweight="bold", color=color,
+                ha=ha, va="center", zorder=z)
+
+    def line(x1, y1, x2, y2, color, wpx, dash=None, z=2):
+        kw = {"linestyle": (0, dash)} if dash else {}
+        ax.plot([x1, x2], [y1, y2], color=color, lw=pt(wpx), zorder=z,
+                solid_capstyle="butt", dash_capstyle="butt", **kw)
+
+    def box(x, y, w, h, fc, ec, lwpx, rad, z=5):
+        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle=f"round,pad=0,rounding_size={rad}",
+                                    fc=fc, ec=ec, lw=pt(lwpx), zorder=z))
+
+    cx, cy, R = W / 2, 1990, 1000
+
+    def xy(b, r):
+        t = math.radians(b)
+        return cx + r * math.sin(t), cy - r * math.cos(t)
+
+    # ---------- header ----------
+    judul = f"Diagram Radar Lokasi Strategis — Radius Maksimal {fmt_r(radius)} km"
+    text(cx, 130, judul, fit(judul, 3560, 112), "#FFFFFF")
+    sub = (f"Koordinat: {to_dms(lat, 'N', 'S')} {to_dms(lon, 'E', 'W')} "
+           f"({lat:.6f}, {lon:.6f})")
+    text(cx, 262, sub, fit(sub, 3560, 70), "#38BDF8")
+    kaw = f"Perkiraan Kawasan: {kawasan}"
+    text(cx, 360, kaw, fit(kaw, 3560, 62), "#CBD5E1")
+    line(120, 440, W - 120, 440, "#1E293B", 6)
+
+    # ---------- sumbu, diagonal, cincin ----------
+    for b in (45, 135, 225, 315):
+        x2, y2 = xy(b, R)
+        line(cx, cy, x2, y2, "#1E293B", 4, z=1)
+    line(cx, cy - R, cx, cy + R, "#334155", 5, z=1)
+    line(cx - R, cy, cx + R, cy, "#334155", 5, z=1)
+    for k in range(1, int(radius) + 1):
+        r = k * R / radius
+        if abs(r - R) < 1:
+            continue
+        ax.add_patch(Circle((cx, cy), r, fill=False, ec="#475569", lw=pt(5),
+                            linestyle=(0, (6, 5)), zorder=1))
+    ax.add_patch(Circle((cx, cy), R, fill=False, ec="#94A3B8", lw=pt(7), zorder=1))
+
+    # posisi titik fasilitas (jarak terlalu kecil diberi jarak minimum agar tidak menimpa RUMAH)
+    for f in fasilitas:
+        f["r_px"] = max(f["d"] / radius * R, 130)
+        f["x"], f["y"] = xy(f["b"], f["r_px"])
+        f["warna"] = WARNA[f["kat"]]
+
+    # ---------- label jarak: pilih diagonal paling lengang ----------
+    ring_km = [k for k in range(1, int(radius) + 1)]
+    if abs(radius - round(radius)) > 1e-9 or radius not in ring_km:
+        ring_km.append(radius)
+    best_b, best_score = 135, -1
+    for b in (135, 45, 225, 315):
+        sc = 1e9
+        for k in ring_km:
+            lx, ly = xy(b, k * R / radius)
+            for f in fasilitas:
+                sc = min(sc, math.hypot(lx - f["x"], ly - f["y"]))
+        if sc > best_score:
+            best_b, best_score = b, sc
+    for k in ring_km:
+        lx, ly = xy(best_b, k * R / radius)
+        s = f"{fmt_r(k)} km"
+        w = tw(s, 44) + 44
+        box(lx - w / 2, ly - 40, w, 80, "#0F172A", "#475569", 3, 14, z=8)
+        text(lx, ly, s, 44, "#CBD5E1", z=9)
+
+    # ---------- kotak arah mata angin ----------
+    def kotak_arah(label, x, y, ha):
+        w = tw(label, 54) + 60
+        x0 = {"c": x - w / 2, "l": x - w, "r": x}[ha]
+        box(x0, y - 48, w, 96, "#0F172A", "#64748B", 4, 18, z=8)
+        text(x0 + w / 2, y, label, 54, "#FFFFFF", z=9)
+
+    kotak_arah("U (Utara)", cx, cy - R - 70, "c")
+    kotak_arah("S (Selatan)", cx, cy + R + 70, "c")
+    kotak_arah("T (Timur)", cx + R + 22, cy, "r")
+    kotak_arah("B (Barat)", cx - R - 22, cy, "l")
+
+    # ---------- garis pusat -> fasilitas ----------
+    for f in fasilitas:
+        line(cx, cy, f["x"], f["y"], f["warna"], 5, dash=(6, 4), z=2)
+
+    # ---------- kartu label ----------
+    COL_RIGHT_EDGE_LEFT, COL_LEFT_EDGE_RIGHT = 880, 2960
+    MAXW = 840
+    for f in fasilitas:
+        inner = MAXW - 52 - 40
+        f["l1"] = wrap(f"[{f['no']}] {f['nama']}", 60, inner)
+        f["l2"] = f"{KAT_DISPLAY[f['kat']]} • {fmt_km(f['d'])} km ({f['arah']})"
+        f["px2"] = fit(f["l2"], inner, 50)
+        wmax = max([tw(s, 60) for s in f["l1"]] + [tw(f["l2"], f["px2"])])
+        f["cw"] = wmax + 52 + 40
+        f["ch"] = 30 + 76 * len(f["l1"]) + 66 + 30
+
+    def susun(items, y_lo=490, y_hi=3330, gap=40, band=(cy - 85, cy + 85)):
+        items.sort(key=lambda f: f["y"])
+        cur = y_lo
+        for f in items:
+            top = max(f["y"] - f["ch"] / 2, cur)
+            if top < band[1] and top + f["ch"] > band[0]:
+                top = band[1] + 10
+            f["top"] = top
+            cur = top + f["ch"] + gap
+        cur = y_hi
+        for f in reversed(items):
+            bottom = min(f["top"] + f["ch"], cur)
+            top = bottom - f["ch"]
+            if top < band[1] and top + f["ch"] > band[0]:
+                top = band[0] - 10 - f["ch"]
+            f["top"] = top
+            cur = top - gap
+
+    kiri = [f for f in fasilitas if f["x"] < cx]
+    kanan = [f for f in fasilitas if f["x"] >= cx]
+    susun(kiri)
+    susun(kanan)
+    for f in kiri:
+        f["cx0"] = COL_RIGHT_EDGE_LEFT - f["cw"]
+        f["anchor"] = (COL_RIGHT_EDGE_LEFT, f["top"] + f["ch"] / 2)
+    for f in kanan:
+        f["cx0"] = COL_LEFT_EDGE_RIGHT
+        f["anchor"] = (COL_LEFT_EDGE_RIGHT, f["top"] + f["ch"] / 2)
+
+    for f in fasilitas:
+        c = f["warna"]
+        line(f["x"], f["y"], f["anchor"][0], f["anchor"][1], c, 4, z=3)
+        box(f["cx0"], f["top"], f["cw"], f["ch"], "#0F172A", c, 5, 26, z=5)
+        ax.add_patch(Rectangle((f["cx0"] + 16, f["top"] + 22), 14, f["ch"] - 44,
+                               fc=c, ec="none", zorder=6))
+        tx = f["cx0"] + 52
+        y = f["top"] + 30 + 38
+        for s in f["l1"]:
+            text(tx, y, s, 60, "#FFFFFF", ha="left")
+            y += 76
+        text(tx, y - 38 + 33 + 6, f["l2"], f["px2"], "#CBD5E1", ha="left")
+
+    # ---------- marker fasilitas & rumah ----------
+    for f in fasilitas:
+        ax.add_patch(Circle((f["x"], f["y"]), 46, fc=f["warna"], ec="#FFFFFF",
+                            lw=pt(6), zorder=10))
+        text(f["x"], f["y"], str(f["no"]), 56, "#FFFFFF", z=11)
+    ax.add_patch(Circle((cx, cy), 44, fc="#DC2626", ec="#FFFFFF", lw=pt(12), zorder=12))
+    wr = tw("RUMAH", 54) + 70
+    box(cx - wr / 2, cy - 160, wr, 96, "#DC2626", "#FFFFFF", 5, 14, z=12)
+    text(cx, cy - 112, "RUMAH", 54, "#FFFFFF", z=13)
+
+    # ---------- legenda ----------
+    urut_warna, label_warna = [], {}
+    for f in fasilitas:
+        w = f["warna"]
+        if w not in urut_warna:
+            urut_warna.append(w)
+        label_warna.setdefault(w, [])
+        if f["kat"] not in label_warna[w]:
+            label_warna[w].append(f["kat"])
+    bx0, bx1, by, bh = 120, W - 120, 3395, 120
+    n = len(urut_warna)
+    bw = (bx1 - bx0) / n
+    for i, w in enumerate(urut_warna):
+        urut = GRUP_LEGENDA.get(w)
+        kats = sorted(label_warna[w], key=lambda k: urut.index(k)) if urut else label_warna[w]
+        lab = " / ".join(KAT_DISPLAY[k] for k in kats)
+        ax.add_patch(Rectangle((bx0 + i * bw, by), bw + 0.5, bh, fc=w, ec="none", zorder=5))
+        tc = "#0B1120" if lum(w) > 0.2 else "#FFFFFF"
+        text(bx0 + i * bw + bw / 2, by + bh / 2, lab, fit(lab, bw - 50, 62), tc, z=6)
+
+    # ---------- catatan kaki ----------
+    foot = (f"Sumber: data Google Maps (dicari lewat Gemini + Google Search), diakses {tanggal_id()}. "
+            f"Jarak berupa perkiraan garis lurus dari titik rumah; arah dihitung dari Utara searah jarum jam.")
+    fy = 3600
+    for s in wrap(foot, 46, 3520):
+        text(140, fy, s, 46, "#94A3B8", ha="left")
+        fy += 70
+
+    fig.savefig(path, dpi=DPI, facecolor=BG)
+    plt.close(fig)
+
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(path) as im:
+        if im.size[0] < 3840 or im.size[1] < 3840:
+            raise RuntimeError(f"Ukuran PNG {im.size} kurang dari 3840x3840")
+
+
+# ----------------------------------- TXT -----------------------------------
+def tulis_txt(path, lat, lon, radius, kawasan, fasilitas):
+    L = []
+    L.append("KETERANGAN LOKASI STRATEGIS")
+    L.append("=" * 60)
+    L.append(f"Titik Rumah       : {to_dms(lat, 'N', 'S')} {to_dms(lon, 'E', 'W')} "
+             f"({lat:.6f}, {lon:.6f})")
+    L.append(f"Perkiraan Kawasan : {kawasan}")
+    L.append(f"Radius Maksimal   : {fmt_r(radius)} km")
+    L.append("=" * 60)
+    for nama, rentang in (("UTARA", "315°–45°"), ("TIMUR", "45°–135°"),
+                          ("SELATAN", "135°–225°"), ("BARAT", "225°–315°")):
+        L.append("")
+        L.append(f"[{nama}] ({rentang})")
+        item = [f for f in fasilitas if sektor(f["b"]) == nama]
+        if not item:
+            L.append(f"* Tidak ada fasilitas terpilih pada sektor ini di dalam radius maksimal "
+                     f"{fmt_r(radius)} km.")
+        for f in sorted(item, key=lambda x: x["no"]):
+            L.append(f"* [{f['no']}] {f['nama']} ({KAT_DISPLAY[f['kat']]}) — "
+                     f"{fmt_km(f['d'])} km ({f['arah']})")
+    L.append("")
+    L.append("-" * 60)
+    L.append(f"Sumber: data Google Maps (dicari lewat Gemini + Google Search), diakses {tanggal_id()}.")
+    L.append("Jarak berupa perkiraan garis lurus dari titik rumah.")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(L) + "\n")
+
+
+# ----------------------------------- kirim -----------------------------------
+def kirim(files, sub):
+    remote = f"{REMOTE_DIR}/{sub}"
+    ssh = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new"]
+    subprocess.run(["ssh"] + ssh + [REMOTE_HOST, f"mkdir -p '{remote}'"], check=True)
+    subprocess.run(["scp"] + ssh + files + [f"{REMOTE_HOST}:{remote}/"], check=True)
+    return remote
+
+
+# ----------------------------------- main -----------------------------------
+def ambil_keys():
+    env = os.environ.get("GEMINI_KEYS", "")
+    keys = [k.strip() for k in env.split(",") if k.strip()] or GEMINI_KEYS
+    return [k for k in keys if k and not k.startswith("ISI_KEY")]
+
+
+def main():
+    keys = ambil_keys()
+    if not keys:
+        sys.exit("Isi dulu GEMINI_KEYS di bagian atas denah_gemini.py (atau env GEMINI_KEYS).")
+
+    if len(sys.argv) >= 2:
+        kor_str = sys.argv[1]
+        radius = float(sys.argv[2].replace(",", ".")) if len(sys.argv) >= 3 else RADIUS_DEFAULT
+    else:
+        kor_str = input("Koordinat (DMS atau desimal): ")
+        r = input(f"Radius maksimal km [{RADIUS_DEFAULT:g}]: ").strip()
+        radius = float(r.replace(",", ".")) if r else RADIUS_DEFAULT
+    lat, lon = parse_koordinat(kor_str)
+    print(f"Titik: {lat:.6f}, {lon:.6f} | radius {radius:g} km | model {MODEL}")
+
+    prompt = buat_prompt(lat, lon, radius)
+    kawasan, fasilitas, error_terakhir = None, [], ""
+    for i, key in enumerate(keys[:6], 1):
+        print(f"[{i}/{min(len(keys), 6)}] Gemini key ...{key[-4:]}", end=" ", flush=True)
+        try:
+            js = ekstrak_json(panggil_gemini(key, prompt))
+            kaw, fas = olah_hasil(js, lat, lon, radius)
+            print(f"-> {len(fas)} fasilitas valid")
+            if len(fas) > len(fasilitas):
+                kawasan, fasilitas = kaw, fas
+            if len(fas) >= 3:
+                break
+        except Exception as e:
+            error_terakhir = str(e)
+            print(f"-> gagal: {error_terakhir[:150]}")
+            time.sleep(3)
+    if not fasilitas:
+        sys.exit(f"Semua percobaan gagal. Error terakhir: {error_terakhir}")
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder = os.path.join(LOCAL_DIR, f"denah_{ts}")
+    os.makedirs(folder, exist_ok=True)
+    png, txt = os.path.join(folder, PNG_NAME), os.path.join(folder, TXT_NAME)
+    print("Membuat PNG 4K (agak lama di HG680P)...")
+    render_png(png, lat, lon, radius, kawasan, fasilitas)
+    tulis_txt(txt, lat, lon, radius, kawasan, fasilitas)
+    try:
+        remote = kirim([png, txt], f"denah_{ts}")
+        print(f"Selesai: {PNG_NAME} & {TXT_NAME} terkirim ke {REMOTE_HOST}:{remote}")
+    except Exception as e:
+        print(f"File jadi tapi gagal dikirim ({e}). Salinan lokal: {folder}")
+
+
+if __name__ == "__main__":
+    main()
