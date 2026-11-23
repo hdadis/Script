@@ -1,6 +1,9 @@
 import telebot
 import requests
 import os
+import io
+import shutil
+import tempfile
 import subprocess
 import re
 import psutil
@@ -252,6 +255,7 @@ try:
         telebot.types.BotCommand("devicesconnected", "Devices"),
         telebot.types.BotCommand("cleancache", "Pembersihan menyeluruh, Nginx & cek disk"),
         telebot.types.BotCommand("restartservices", "Restart service smbd & cups"),
+        telebot.types.BotCommand("denah", "Diagram radar lokasi strategis"),
     ])
 except Exception as e:
     print(f"Peringatan koneksi: {e}")
@@ -456,6 +460,198 @@ def get_uptime():
     minutes, seconds = divmod(remainder, 60)
     return f"{int(days)}d {int(hours)}h {int(minutes)}m {int(seconds)}s"
 
+# ==============================================================================
+# DENAH — Diagram Radar Lokasi Strategis (memanggil /usr/local/bin/denah)
+# Pemakaian: /denah <koordinat> [radius] [--sumber osm|auto|gemini]
+#            /run sudo denah "<koordinat>" [radius]   (sama saja)
+# Hasil (preview + PNG 4K + keterangan TXT) dikirim ke Telegram.
+# Denah tetap bisa dijalankan mandiri lewat terminal; bot hanya memanggilnya.
+# ==============================================================================
+DENAH_BIN = "/usr/local/bin/denah"
+DENAH_TIMEOUT = 900
+DENAH_RADIUS_MAKS = 20.0
+DENAH_PNG_NAME = "diagram_radar_lokasi_strategis.png"
+DENAH_TXT_NAME = "keterangan_lokasi_strategis.txt"
+denah_lock = threading.Lock()
+
+DENAH_BANTUAN = (
+    "Format Denah:\n"
+    '/run sudo denah "6°23\'22.8"S 106°44\'21.8"E" 4\n'
+    "/denah -6.389667 106.739389 4\n\n"
+    "Radius (km) opsional, default 4, maksimal 20.\n"
+    "Opsi: --sumber osm | auto | gemini"
+)
+
+def denah_normalisasi(teks):
+    t = teks or ""
+    t = re.sub(r"[—–]+(?=[A-Za-z])", "--", t)  # autokoreksi HP: — menjadi --
+    t = t.replace("“", '"').replace("”", '"').replace("″", '"')
+    t = t.replace("‘", "'").replace("’", "'").replace("′", "'")
+    return t.strip()
+
+def denah_dari_run(teks):
+    """Jika pesan berbentuk '/run [sudo] denah ...' kembalikan argumennya, selain itu None."""
+    t = (teks or "").strip()
+    m = re.match(r"^/run(?:@\w+)?\s+(.*)$", t, re.I | re.S)
+    if not m:
+        return None
+    m2 = re.match(r"^(?:sudo\s+)?denah(?:\s+(.*))?$", m.group(1).strip(), re.I | re.S)
+    if not m2:
+        return None
+    return (m2.group(1) or "").strip()
+
+def denah_parse_args(rest):
+    """Kembalikan (koordinat, radius_atau_None, sumber_atau_None). Raise ValueError jika salah."""
+    t = denah_normalisasi(rest)
+    sumber = None
+    m = re.search(r"--sumber[\s=]+(osm|auto|gemini)\b", t, re.I)
+    if m:
+        sumber = m.group(1).lower()
+        t = (t[:m.start()] + " " + t[m.end():]).strip()
+    if not t:
+        raise ValueError("Koordinat belum diisi.")
+    if t[:1] in ("\"", "'"):  # kutip pembungkus di awal
+        t = t[1:].strip()
+    if not t:
+        raise ValueError("Koordinat belum diisi.")
+
+    radius = None
+    if "°" in t:
+        hem = list(re.finditer(r"(?:LU|LS|BT|BB|[NSEW])(?![A-Za-z])", t, re.I))
+        koor = t
+        if len(hem) >= 2:
+            akhir = hem[-1]
+            tail = t[akhir.end():]
+            if "°" not in tail:
+                koor = t[:akhir.end()]
+                r = re.search(r"\d+(?:[.,]\d+)?", tail)
+                if r:
+                    radius = r.group(0)
+    else:
+        nums = re.findall(r"[+-]?\d+(?:[.,]\d+)?", t)
+        if len(nums) < 2:
+            raise ValueError("Koordinat tidak dikenali.")
+        koor = f"{nums[0].replace(',', '.')},{nums[1].replace(',', '.')}"
+        if len(nums) >= 3:
+            radius = nums[2]
+
+    if radius is not None:
+        try:
+            nilai = float(radius.replace(",", "."))
+        except ValueError:
+            raise ValueError("Radius tidak valid.")
+        if nilai <= 0 or nilai > DENAH_RADIUS_MAKS:
+            raise ValueError(f"Radius harus lebih dari 0 dan maksimal {DENAH_RADIUS_MAKS:g} km.")
+        radius = radius.replace(",", ".")
+    return koor.strip(), radius, sumber
+
+def denah_preview_jpeg(png_path):
+    """Preview ringan untuk dilihat langsung di chat (butuh Pillow; jika tidak ada, dilewati)."""
+    try:
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(png_path) as im:
+            im = im.convert("RGB")
+            im.thumbnail((1800, 1800))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=88)
+            buf.seek(0)
+            buf.name = "preview.jpg"
+            return buf
+    except Exception:
+        return None
+
+def denah_worker(chat_id, koor, radius, sumber):
+    tmp = tempfile.mkdtemp(prefix="denah_tg_")
+    try:
+        cmd = [] if os.geteuid() == 0 else ["sudo"]
+        cmd += [DENAH_BIN, "--salin-ke", tmp]
+        if sumber:
+            cmd += ["--sumber", sumber]
+        cmd += ["--", koor]
+        if radius:
+            cmd.append(radius)
+
+        try:
+            hasil = subprocess.run(
+                cmd, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=DENAH_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            bot.send_message(chat_id, f"❌ Denah melebihi batas waktu ({DENAH_TIMEOUT // 60} menit) dan dihentikan.")
+            return
+
+        out = (hasil.stdout or "") + (hasil.stderr or "")
+        png = os.path.join(tmp, DENAH_PNG_NAME)
+        txt = os.path.join(tmp, DENAH_TXT_NAME)
+
+        if hasil.returncode != 0 or not os.path.isfile(png):
+            ekor = out.strip()[-3500:] or "(tidak ada output)"
+            bot.send_message(chat_id, f"❌ Denah gagal (exit {hasil.returncode}):\n{ekor}")
+            return
+
+        kaw = re.search(r"^Kawasan:\s*(.*)$", out, re.M)
+        kawasan = kaw.group(1).strip() if kaw else "-"
+        ringkas = f"🗺️ Diagram Radar Lokasi Strategis\n📍 {koor}\n🏘️ {kawasan}"
+        if radius:
+            ringkas += f"\n📏 Radius {radius} km"
+
+        prev = denah_preview_jpeg(png)
+        if prev:
+            bot.send_photo(chat_id, prev, caption=ringkas[:1000], timeout=120)
+        with open(png, "rb") as f:
+            bot.send_document(chat_id, f, caption="PNG 4K (kualitas penuh)", timeout=300)
+
+        if os.path.isfile(txt):
+            with open(txt, "r", encoding="utf-8") as f:
+                isi = f.read()
+            if len(isi) <= 3900:
+                bot.send_message(chat_id, isi)
+            with open(txt, "rb") as f:
+                bot.send_document(chat_id, f, caption="Keterangan lokasi strategis (TXT)", timeout=120)
+
+        if "gagal dikirim" in out:
+            bot.send_message(chat_id, "⚠️ Hasil terkirim ke Telegram, tetapi gagal disalin ke 192.168.18.2 (IDM).")
+    except Exception as e:
+        try:
+            bot.send_message(chat_id, f"❌ Terjadi kesalahan: {e}")
+        except Exception:
+            pass
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        denah_lock.release()
+
+def denah_mulai(message, rest):
+    if str(message.chat.id) != MY_CHAT_ID:
+        bot.reply_to(message, "⛔ Anda tidak memiliki akses untuk menjalankan perintah ini.")
+        return
+    if not os.path.exists(DENAH_BIN):
+        bot.reply_to(message, "❌ Perintah 'denah' belum terpasang di STB. Jalankan dulu install.sh Denah.")
+        return
+    try:
+        koor, radius, sumber = denah_parse_args(rest)
+    except ValueError as e:
+        bot.reply_to(message, f"⚠️ {e}\n\n{DENAH_BANTUAN}")
+        return
+    if not denah_lock.acquire(blocking=False):
+        bot.reply_to(message, "⏳ Denah sebelumnya masih berjalan. Tunggu sampai selesai (STB hanya 1 GB RAM).")
+        return
+    info_radius = f" (radius {radius} km)" if radius else ""
+    bot.reply_to(message, f"🗺️ Denah diproses untuk {koor}{info_radius}.\n"
+                          "Biasanya 1–5 menit, hasil dikirim otomatis ke sini.")
+    threading.Thread(target=denah_worker, args=(message.chat.id, koor, radius, sumber), daemon=True).start()
+
+# Handler ini sengaja didaftarkan SEBELUM handler /run biasa, sehingga hanya
+# '/run sudo denah ...' yang dicegat; semua perintah /run lainnya tetap normal.
+@bot.message_handler(commands=["run", "Run"], func=lambda m: denah_dari_run(m.text) is not None)
+def run_denah(message):
+    denah_mulai(message, denah_dari_run(message.text))
+
+@bot.message_handler(commands=["denah", "Denah"])
+def cmd_denah(message):
+    rest = re.sub(r"^/denah(?:@\w+)?", "", message.text or "", flags=re.I).strip()
+    denah_mulai(message, rest)
+
 @bot.message_handler(commands=["start", "Start", "help", "Help"])
 def send_welcome(message):
     menu = (
@@ -467,7 +663,9 @@ def send_welcome(message):
         "➡️ /run <perintah> - Jalankan perintah terminal\n"
         "➡️ /cleancache - Pembersihan (>5 jam), Nginx & cek disk\n"
         "➡️ /cleancache all - Sapu bersih semua file unduhan sekarang\n"
-        "➡️ /restartservices - Restart service smbd & cups"
+        "➡️ /restartservices - Restart service smbd & cups\n"
+        "➡️ /denah koordinat radius - Diagram radar lokasi strategis\n"
+        "➡️ /run sudo denah koordinat radius - Sama dengan /denah"
     )
     bot.reply_to(message, menu, parse_mode="Markdown")
 
